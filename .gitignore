@@ -4,6 +4,9 @@
 *.opensdf
 *.csproj.user
 *.vcxproj.user
+.vs/
+Authenticator/.vs
+WinAuth/.vs
 WinAuth.YubiKey/Debug
 WinAuth.YubiKey/Release
 WinAuth.YubiKey/x64/Debug
@@ -15,8 +18,10 @@ Net*/obj
 Net*/x86
 Net*/x64
 Net*/packages
+Third Party/InputSimulator/.vs
 Third Party/InputSimulator/bin
 Third Party/InputSimulator/obj
+Third Party/MetroFramework/.vs
 Third Party/MetroFramework/MetroFramework.Design/bin
 Third Party/MetroFramework/MetroFramework.Design/obj
 Third Party/MetroFramework/MetroFramework/bin

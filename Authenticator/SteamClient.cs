@@ -511,7 +511,7 @@ namespace WinAuth
 		/// <param name="captchaId"></param>
 		/// <param name="captchaText"></param>
 		/// <returns>true if successful</returns>
-		public bool Login(string username, string password, string captchaId = null, string captchaText = null)
+		public bool Login(string username, string password, string captchaId = null, string captchaText = null, bool remember = false)
 		{
 			// clear error
 			this.Error = null;
@@ -579,7 +579,8 @@ namespace WinAuth
 				data.Add("captcha_text", (string.IsNullOrEmpty(captchaText) == false ? captchaText : "enter above characters"));
 				//data.Add("emailsteamid", (string.IsNullOrEmpty(emailcode) == false ? this.SteamId ?? string.Empty : string.Empty));
 				data.Add("rsatimestamp", rsaresponse.SelectToken("timestamp").Value<string>());
-				data.Add("remember_login", "false");
+                data.Add("remember_login", remember ? "true" : "false");
+                data.Add("remember_login", "false");
 				data.Add("oauth_client_id", "DE45CD61");
 				data.Add("oauth_scope", "read_profile write_profile read_client write_client");
 				data.Add("donotache", new DateTime().ToUniversalTime().Subtract(new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds.ToString());
@@ -591,15 +592,20 @@ namespace WinAuth
 					this.Session.SteamId = loginresponse["emailsteamid"] as string;
 				}
 
-				this.InvalidLogin = false;
-				this.RequiresCaptcha = false;
+                string transferparameters = loginresponse["transfer_parameters"].ToString();
+                JObject transferparametersjson = JObject.Parse(transferparameters);
+                string steamid = (string)transferparametersjson["steamid"];
+                string auth = (string)transferparametersjson["auth"];
+
+                this.InvalidLogin = false;
+                this.RequiresCaptcha = false;
 				this.CaptchaId = null;
 				this.CaptchaUrl = null;
 				this.RequiresEmailAuth = false;
 				this.EmailDomain = null;
 				this.Requires2FA = false;
 
-				if (loginresponse.ContainsKey("login_complete") == false || (bool)loginresponse["login_complete"] == false || loginresponse.ContainsKey("oauth") == false)
+				if (loginresponse.ContainsKey("login_complete") == false || (bool)loginresponse["login_complete"] == false || string.IsNullOrEmpty(auth))
 				{
 					this.InvalidLogin = true;
 
@@ -640,13 +646,8 @@ namespace WinAuth
 				}
 
 				// get the OAuth token
-				string oauth = (string)loginresponse["oauth"];
-				var oauthjson = JObject.Parse(oauth);
-				this.Session.OAuthToken = oauthjson.SelectToken("oauth_token").Value<string>();
-				if (oauthjson.SelectToken("steamid") != null)
-				{
-					this.Session.SteamId = oauthjson.SelectToken("steamid").Value<string>();
-				}
+				this.Session.SteamId = steamid;
+                this.Session.OAuthToken = auth;
 
 				//// perform UMQ login
 				//data.Clear();
@@ -1112,60 +1113,43 @@ namespace WinAuth
 			data.Add("m", "android");
 			data.Add("tag", "conf");
 
-			string html = GetString(COMMUNITY_BASE + "/mobileconf/conf", "GET", data);
+            string html = GetString(COMMUNITY_BASE + "/mobileconf/getlist", "GET", data);
 
-			// save last html for confirmations details
-			ConfirmationsHtml = html;
+            // save last html for confirmations details
+            ConfirmationsHtml = html;
 			ConfirmationsQuery = string.Join("&", Array.ConvertAll(data.AllKeys, key => String.Format("{0}={1}", HttpUtility.UrlEncode(key), HttpUtility.UrlEncode(data[key]))));
 
 			List<Confirmation> trades = new List<Confirmation>();
 
-			// extract the trades
-			Match match = _tradesRegex.Match(html);
-			while (match.Success)
-			{
-				var tradeIds = match.Groups[1].Value;
+            // extract the trades
+            JObject confJson = JObject.Parse(html);
+            var confTrades = confJson["conf"];
+            if (confJson["success"].Value<bool>() == true && confTrades.Count() > 0)
+            {
+                foreach (var confTrade in confTrades)
+                {
+                    var trade = new Confirmation();
 
-				var trade = new Confirmation();
+                    trade.Id = confTrade["id"].Value<string>();
+                    trade.Image = confTrade["icon"].Value<string>();
+                    trade.Key = confTrade["nonce"].Value<string>();
 
-				var innerMatch = _tradeConfidRegex.Match(tradeIds);
-				if (innerMatch.Success)
-				{
-					trade.Id = innerMatch.Groups[1].Value;
-				}
-				innerMatch = _tradeKeyRegex.Match(tradeIds);
-				if (innerMatch.Success)
-				{
-					trade.Key = innerMatch.Groups[1].Value;
-				}
 
-				var traded = match.Groups[2].Value;
+                    string tradeType = confTrade["type_name"].Value<string>();
+                    trade.Details = tradeType + " - " + String.Join(Environment.NewLine, confTrade["summary"].Values<string>());
 
-				innerMatch = _tradePlayerRegex.Match(traded);
-				if (innerMatch.Success)
-				{
-					if (innerMatch.Groups[1].Value.IndexOf("offline") != -1)
-					{
-						trade.Offline = true;
-					}
-					trade.Image = innerMatch.Groups[2].Value;
-				}
+                    trade.Traded = confTrade["headline"].Value<string>();
 
-				innerMatch = _tradeDetailsRegex.Match(traded);
-				if (innerMatch.Success)
-				{
-					trade.Details = innerMatch.Groups[1].Value;
-					trade.Traded = innerMatch.Groups[2].Value;
-					trade.When = innerMatch.Groups[3].Value;
-				}
+                    long unixTimestamp = confTrade["creation_time"].Value<long>();
+                    DateTime dtDateTime = DateTimeOffset.FromUnixTimeSeconds(unixTimestamp).DateTime;
+                    string dateString = dtDateTime.ToString();
+                    trade.When = dateString;
 
-				trades.Add(trade);
-
-				match = match.NextMatch();
-			}
-
-			if (this.Session.Confirmations != null)
-			{
+                    trades.Add(trade);
+                }
+            }
+            if (this.Session.Confirmations != null)
+            {
 				lock (this.Session.Confirmations)
 				{
 					if (this.Session.Confirmations.Ids == null)
